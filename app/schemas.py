@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -138,3 +138,96 @@ class DiffOut(BaseModel):
     new_event_cutoff_id: str | None
     student_changes: list[dict[str, Any]]
     students_affected: int
+
+
+# ---------------------------------------------------------------- 批量对账
+
+
+class ExternalSummaryRowIn(BaseModel):
+    """院校报送汇总表中的一行：某学生某活动类型某教学日的秒数。"""
+
+    student_id: str = Field(..., min_length=1, max_length=128)
+    activity_type: str = Field(..., min_length=1, max_length=64)
+    academic_day: date
+    seconds: int = Field(..., ge=0)
+
+
+class ReconItemIn(BaseModel):
+    plan_version: str = Field(..., min_length=1, max_length=128)
+    freeze_id: str = Field(..., min_length=1, max_length=128)
+    external_rows: list[ExternalSummaryRowIn] = Field(default_factory=list)
+
+
+class ReconBatchIn(BaseModel):
+    items: list[ReconItemIn] = Field(..., min_length=1)
+
+
+class ReconItemOut(BaseModel):
+    item_id: str
+    batch_id: str
+    seq: int
+    plan_version: str
+    freeze_id: str
+    snapshot_fingerprint: str
+    external_fingerprint: str
+    status: str
+    attempts: int
+    cursor: int
+    matched_count: int
+    exception_count: int
+    error: str | None
+
+
+class ReconBatchOut(BaseModel):
+    batch_id: str
+    created_by: str
+    status: str
+    version: int
+    signed_by: str | None
+    signed_at: datetime | None
+    created_at: datetime
+    item_count: int
+    done_count: int
+    failed_count: int
+    exception_count: int
+    open_exception_count: int
+    items: list[ReconItemOut] = []
+
+
+class ReconExceptionOut(BaseModel):
+    exception_id: str
+    batch_id: str
+    item_id: str
+    student_id: str
+    activity_type: str
+    academic_day: str
+    category: str
+    snapshot_seconds: int
+    external_seconds: int
+    delta_seconds: int
+    status: str
+    assignee: str | None
+    claimed_at: datetime | None
+    reviewer: str | None
+    review_note: str | None
+    reviewed_at: datetime | None
+    version: int
+
+
+class ReconReviewIn(BaseModel):
+    decision: Literal["resolved", "dismissed"]
+    note: str = Field("", max_length=512)
+    expected_version: int = Field(..., ge=1)
+
+
+class ReconExportOut(BaseModel):
+    batch_id: str
+    status: str
+    created_by: str
+    signed_by: str | None
+    items: list[ReconItemOut]
+    exceptions: list[dict[str, Any]]
+    breakdowns: dict[str, list[dict[str, Any]]]
+    totals: dict[str, int]
+    exported_by: str
+    export_fingerprint: str
