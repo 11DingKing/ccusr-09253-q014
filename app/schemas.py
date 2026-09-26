@@ -138,3 +138,31 @@ class DiffOut(BaseModel):
     new_event_cutoff_id: str | None
     student_changes: list[dict[str, Any]]
     students_affected: int
+
+
+class ReconItemIn(BaseModel):
+    plan_version: str = Field(..., min_length=1, max_length=128)
+    freeze_id: str = Field(..., min_length=1, max_length=128)
+
+
+class ExternalEntryIn(BaseModel):
+    """院校报送汇总行：与内部事实同粒度（学生 × 活动类型 × 教学日）。"""
+
+    plan_version: str = Field(..., min_length=1, max_length=128)
+    student_id: str = Field(..., min_length=1, max_length=128)
+    activity_type: str = Field("regular", max_length=64)
+    academic_day: str = Field("", max_length=32)
+    seconds: int
+
+
+class ReconBatchCreateIn(BaseModel):
+    batch_id: str = Field(..., min_length=1, max_length=128)
+    title: str = Field("", max_length=256)
+    items: list[ReconItemIn] = Field(..., min_length=1)
+    external_entries: list[ExternalEntryIn] = []
+    supersedes_batch_id: str | None = Field(None, max_length=128)
+
+
+class ReconReviewIn(BaseModel):
+    verdict: Literal["confirmed", "rejected"]
+    note: str = Field("", max_length=512)

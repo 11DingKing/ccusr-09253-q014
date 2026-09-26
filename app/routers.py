@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from . import services
+from . import recon_service, services
+from .auth import Actor, get_actor
 from .db import get_db
 from .schemas import (
     DiffOut,
@@ -16,6 +17,8 @@ from .schemas import (
     ImportResult,
     PlanIn,
     PlanOut,
+    ReconBatchCreateIn,
+    ReconReviewIn,
     SnapshotOut,
     StudentProgressOut,
 )
@@ -160,3 +163,114 @@ def get_diff(
         )
     except (services.PlanNotFoundError, services.FreezeNotFoundError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# --- 对账批次 ---
+
+
+@router.post("/recon-batches", status_code=status.HTTP_201_CREATED)
+def create_recon_batch(
+    body: ReconBatchCreateIn,
+    response: Response,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_actor),
+) -> Any:
+    """创建对账批次，固定快照与外部汇总的内容指纹；相同内容重复创建返回已有批次。"""
+    detail, created = recon_service.create_batch(
+        db,
+        actor=actor,
+        batch_id=body.batch_id,
+        title=body.title,
+        items=[i.model_dump() for i in body.items],
+        external_entries=[e.model_dump() for e in body.external_entries],
+        supersedes_batch_id=body.supersedes_batch_id,
+    )
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return detail
+
+
+@router.get("/recon-batches")
+def list_recon_batches(
+    db: Session = Depends(get_db), actor: Actor = Depends(get_actor)
+) -> Any:
+    return recon_service.list_batches(db, actor=actor)
+
+
+@router.get("/recon-batches/{batch_id}")
+def get_recon_batch(
+    batch_id: str,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_actor),
+) -> Any:
+    return recon_service.get_batch_detail(db, batch_id=batch_id, actor=actor)
+
+
+@router.post("/recon-batches/{batch_id}/run")
+def run_recon_batch(
+    batch_id: str,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_actor),
+) -> Any:
+    """运行对账作业：断点续跑、失败条目幂等重试；已签署批次拒绝重跑。"""
+    return recon_service.run_batch(db, batch_id=batch_id, actor=actor)
+
+
+@router.get("/recon-batches/{batch_id}/exceptions")
+def list_recon_exceptions(
+    batch_id: str,
+    exc_status: Annotated[str | None, Query(alias="status")] = None,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_actor),
+) -> Any:
+    return recon_service.list_exceptions(
+        db, batch_id=batch_id, actor=actor, status=exc_status
+    )
+
+
+@router.post("/recon-batches/{batch_id}/exceptions/{exception_id}/claim")
+def claim_recon_exception(
+    batch_id: str,
+    exception_id: str,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_actor),
+) -> Any:
+    return recon_service.claim_exception(
+        db, batch_id=batch_id, exception_id=exception_id, actor=actor
+    )
+
+
+@router.post("/recon-batches/{batch_id}/exceptions/{exception_id}/review")
+def review_recon_exception(
+    batch_id: str,
+    exception_id: str,
+    body: ReconReviewIn,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_actor),
+) -> Any:
+    return recon_service.review_exception(
+        db,
+        batch_id=batch_id,
+        exception_id=exception_id,
+        actor=actor,
+        verdict=body.verdict,
+        note=body.note,
+    )
+
+
+@router.post("/recon-batches/{batch_id}/sign")
+def sign_recon_batch(
+    batch_id: str,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_actor),
+) -> Any:
+    return recon_service.sign_batch(db, batch_id=batch_id, actor=actor)
+
+
+@router.get("/recon-batches/{batch_id}/export")
+def export_recon_batch(
+    batch_id: str,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_actor),
+) -> Any:
+    return recon_service.export_batch(db, batch_id=batch_id, actor=actor)
